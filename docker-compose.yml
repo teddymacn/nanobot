@@ -3,7 +3,12 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
-    - ~/.nanobot:/root/.nanobot
+    - ~/.nanobot/config.json:/root/.nanobot/config.json:ro
+    - ./roles/coder:/root/.nanobot/workspace
+    - ./skills:/root/.nanobot/workspace/skills
+    - /root/.nanobot/workspace/memory # anonymous volume for fresh memory each time
+  env_file:
+    - .env
 
 services:
   nanobot-gateway:
@@ -16,12 +21,12 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
         reservations:
-          cpus: '0.25'
+          cpus: "0.25"
           memory: 256M
-  
+
   nanobot-cli:
     <<: *common-config
     profiles:
