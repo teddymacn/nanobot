@@ -28,4 +28,3 @@ roles/**/*
 !roles/**/*.md
 roles/**/memory/*
 
-.beads/
