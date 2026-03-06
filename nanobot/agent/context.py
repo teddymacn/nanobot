@@ -23,9 +23,23 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self._system_prompt_cache: str | None = None
+        self._system_prompt_mtime: float = 0
 
     def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        # Check if any bootstrap files have changed since last build
+        latest_mtime: float = 0
+        for filename in self.BOOTSTRAP_FILES:
+            path = self.workspace / filename
+            if path.exists():
+                latest_mtime = max(latest_mtime, path.stat().st_mtime)
+
+        if (self._system_prompt_cache is not None
+                and latest_mtime <= self._system_prompt_mtime
+                and skill_names is None):
+            return self._system_prompt_cache
+
         parts = [self._get_identity()]
 
         bootstrap = self._load_bootstrap_files()
@@ -51,7 +65,11 @@ Skills with available="false" need dependencies installed first - you can try in
 
 {skills_summary}""")
 
-        return "\n\n---\n\n".join(parts)
+        result = "\n\n---\n\n".join(parts)
+        if skill_names is None:
+            self._system_prompt_cache = result
+            self._system_prompt_mtime = latest_mtime
+        return result
 
     def _get_identity(self) -> str:
         """Get the core identity section."""

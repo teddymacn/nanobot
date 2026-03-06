@@ -132,7 +132,10 @@ class AgentLoop:
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
-        if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
+        if not self._mcp_servers:
+            self._mcp_connected = True  # Mark done to short-circuit future calls
+            return
+        if self._mcp_connected or self._mcp_connecting:
             return
         self._mcp_connecting = True
         from nanobot.agent.tools.mcp import connect_mcp_servers
@@ -229,6 +232,8 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    if len(result) > self._TOOL_RESULT_MAX_CHARS:
+                        result = result[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -498,6 +503,27 @@ class AgentLoop:
             archive_all=archive_all, memory_window=self.memory_window,
         )
 
+    _TRIVIAL_PATTERNS = [
+        re.compile(r"^what'?s?\s+\d+\s*[+\-*/]\s*\d+", re.IGNORECASE),
+        re.compile(r"^\d+\s*[+\-*/]\s*\d+$"),
+        re.compile(r"^(hello|hi|hey)$", re.IGNORECASE),
+    ]
+
+    async def _fast_respond(self, content: str, session_key: str) -> str:
+        """Handle trivial queries with minimal context and no tools."""
+        response = await self.provider.chat(
+            messages=[
+                {"role": "system", "content": self.context._get_identity()},
+                {"role": "user", "content": content},
+            ],
+            tools=[],
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=512,
+            reasoning_effort=self.reasoning_effort,
+        )
+        return self._strip_think(response.content) or ""
+
     async def process_direct(
         self,
         content: str,
@@ -507,6 +533,10 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """Process a message directly (for CLI or cron usage)."""
+        for pattern in self._TRIVIAL_PATTERNS:
+            if pattern.match(content.strip()):
+                return await self._fast_respond(content, session_key)
+
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
