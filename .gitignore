@@ -20,4 +20,11 @@ __pycache__/
 poetry.lock
 .pytest_cache/
 botpy.log
+tests/
 
+# Include only .md files from role workspaces
+roles/**/*
+!roles/**/
+!roles/**/*.md
+
+.beads/
