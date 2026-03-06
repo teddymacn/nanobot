@@ -7,6 +7,9 @@ x-common-config: &common-config
     - ./roles/coder:/root/.nanobot/workspace
     - ./skills:/root/.nanobot/workspace/skills
     - /root/.nanobot/workspace/memory # anonymous volume for fresh memory each time
+    - ./roles/coder/memory/HISTORY.md:/root/.nanobot/workspace/memory/HISTORY.md # expose history
+    - ./roles/beads-template/HEARTBEAT.md:/root/.nanobot/workspace/HEARTBEAT.md
+    - .:/root/.nanobot/workspace/project
   env_file:
     - .env
 

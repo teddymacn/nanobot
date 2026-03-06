@@ -26,5 +26,6 @@ tests/
 roles/**/*
 !roles/**/
 !roles/**/*.md
+roles/**/memory/*
 
 .beads/
