@@ -1,10 +1,6 @@
 ---
 name: beads
-description: >
-  Interact with the beads (bd) task tracker stored in the repo's .beads folder.
-  Use this skill for: checking assigned tasks, claiming work, writing heartbeat
-  progress notes into issue notes, and closing completed issues.
-  Auto-triggered during heartbeat when idle, and periodically during active work.
+description: Interact with the beads (bd) task tracker in the repo's .beads folder. Use for checking assigned tasks, claiming work, writing heartbeat progress notes, and closing completed issues.
 ---
 
 # Beads Task Tracker Skill

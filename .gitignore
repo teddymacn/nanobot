@@ -28,3 +28,4 @@ roles/**/*
 !roles/**/*.md
 roles/**/memory/*
 
+.claude/settings.local.json

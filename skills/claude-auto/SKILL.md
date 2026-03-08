@@ -1,6 +1,6 @@
 ---
 name: claude-auto
-description: Execute Claude Code CLI in full auto mode for coding tasks. **ALWAYS USES BACKGROUND MODE.** Auto-triggered for any task involving Claude Code CLI. Use for code generation, refactoring, debugging, testing, or any development work. All tasks run with --dangerously-skip-permissions flag (full auto-approval, sandbox-safe). Includes model listing and validation.
+description: Execute Claude Code CLI in full auto mode for coding tasks. Runs in background mode with --dangerously-skip-permissions flag. Use for code generation, refactoring, debugging, testing, or any development work.
 ---
 
 # Claude Code Auto Executor

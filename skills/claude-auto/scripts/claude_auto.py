@@ -320,6 +320,39 @@ def get_job_dir():
     return Path.home() / ".claude-jobs"
 
 
+def is_process_running(pid: int) -> bool:
+    """
+    Check if a process is actually running (not a zombie).
+    
+    Args:
+        pid: Process ID to check
+        
+    Returns:
+        True if process is running, False if dead or zombie
+    """
+    try:
+        # First check if process exists
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    
+    # Process exists, but check if it's a zombie
+    # Zombie processes still pass kill(pid, 0) but are not actually running
+    try:
+        status_file = Path(f"/proc/{pid}/status")
+        if status_file.exists():
+            with open(status_file, "r") as f:
+                for line in f:
+                    if line.startswith("State:"):
+                        # State: Z means zombie
+                        return "Z" not in line
+    except (IOError, PermissionError):
+        # If we can't read status, assume running if kill succeeded
+        pass
+    
+    return True
+
+
 def generate_job_id():
     """Generate a unique job ID based on timestamp and PID."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -415,11 +448,9 @@ def check_job_status(job_id):
     if pid_file.exists():
         with open(pid_file, "r") as f:
             pid = int(f.read().strip())
-        try:
-            os.kill(pid, 0)
+        if is_process_running(pid):
             is_running = True
-        except OSError:
-            is_running = False
+        else:
             update_job_status(job_id, "completed")
     
     meta["is_running"] = is_running
@@ -463,13 +494,10 @@ def get_job_results(job_id):
     if pid_file.exists():
         with open(pid_file, "r") as f:
             pid = int(f.read().strip())
-        try:
-            os.kill(pid, 0)
+        if is_process_running(pid):
             print("⚠️  Warning: Job is still running!")
             print("Use 'status' command to check progress.")
             return
-        except OSError:
-            pass
     
     print(f"=== Results for job: {job_id} ===")
     print(f"Task: {meta.get('task', 'N/A')}")
@@ -507,15 +535,14 @@ def list_jobs():
         start_time = meta.get("start_time", "unknown")[:19]
         status = meta.get("status", "unknown")
         
-        # Check if running
+        # Check if running (not zombie)
         pid_file = job_dir / f"{job_id}.pid"
         if pid_file.exists():
             try:
                 with open(pid_file, "r") as f:
                     pid = int(f.read().strip())
-                os.kill(pid, 0)
-                status = "running"
-            except OSError:
+                status = "running" if is_process_running(pid) else "completed"
+            except (OSError, ValueError):
                 status = "completed"
         
         print(f"{job_id:<40} {status:<12} {model:<20} {start_time}")
