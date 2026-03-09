@@ -194,14 +194,24 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=self.tools.get_definitions(),
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                reasoning_effort=self.reasoning_effort,
-            )
+            for attempt in range(3):
+                try:
+                    response = await self.provider.chat(
+                        messages=messages,
+                        tools=self.tools.get_definitions(),
+                        model=self.model,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        reasoning_effort=self.reasoning_effort,
+                    )
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning("Provider chat failed (attempt {}/3): {}, retrying...", attempt + 1, str(e)[:200])
+                        await asyncio.sleep(1)
+                    else:
+                        logger.error("Provider chat failed after 3 attempts.")
+                        raise e
 
             if response.has_tool_calls:
                 if on_progress:
@@ -511,17 +521,28 @@ class AgentLoop:
 
     async def _fast_respond(self, content: str, session_key: str) -> str:
         """Handle trivial queries with minimal context and no tools."""
-        response = await self.provider.chat(
-            messages=[
-                {"role": "system", "content": self.context._get_identity()},
-                {"role": "user", "content": content},
-            ],
-            tools=[],
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=512,
-            reasoning_effort=self.reasoning_effort,
-        )
+        response = None
+        for attempt in range(3):
+            try:
+                response = await self.provider.chat(
+                    messages=[
+                        {"role": "system", "content": self.context._get_identity()},
+                        {"role": "user", "content": content},
+                    ],
+                    tools=[],
+                    model=self.model,
+                    temperature=self.temperature,
+                    max_tokens=512,
+                    reasoning_effort=self.reasoning_effort,
+                )
+                break
+            except Exception as e:
+                if attempt < 2:
+                    logger.warning("Fast respond chat failed (attempt {}/3): {}, retrying...", attempt + 1, str(e)[:200])
+                    await asyncio.sleep(1)
+                else:
+                    logger.error("Fast respond chat failed after 3 attempts.")
+                    raise e
         return self._strip_think(response.content) or ""
 
     async def process_direct(
