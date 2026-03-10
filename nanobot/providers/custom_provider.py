@@ -26,9 +26,15 @@ class CustomProvider(LLMProvider):
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
                    reasoning_effort: str | None = None) -> LLMResponse:
+        sanitized_messages = self._sanitize_empty_content(messages)
+        for m in sanitized_messages:
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                if m.get("content") is None:
+                    m["content"] = ""
+
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
-            "messages": self._sanitize_empty_content(messages),
+            "messages": sanitized_messages,
             "max_tokens": max(1, max_tokens),
             "temperature": temperature,
         }
