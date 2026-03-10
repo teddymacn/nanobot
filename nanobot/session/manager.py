@@ -49,10 +49,14 @@ class Session:
         sliced = unconsolidated[-max_messages:]
 
         # Drop leading non-user messages to avoid orphaned tool_result blocks
+        found_user = False
         for i, m in enumerate(sliced):
             if m.get("role") == "user":
                 sliced = sliced[i:]
+                found_user = True
                 break
+        if not found_user:
+            sliced = []
 
         out: list[dict[str, Any]] = []
         for m in sliced:

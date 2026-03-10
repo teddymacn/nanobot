@@ -123,14 +123,24 @@ class SubagentManager:
             while iteration < max_iterations:
                 iteration += 1
 
-                response = await self.provider.chat(
-                    messages=messages,
-                    tools=tools.get_definitions(),
-                    model=self.model,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    reasoning_effort=self.reasoning_effort,
-                )
+                for attempt in range(3):
+                    try:
+                        response = await self.provider.chat(
+                            messages=messages,
+                            tools=tools.get_definitions(),
+                            model=self.model,
+                            temperature=self.temperature,
+                            max_tokens=self.max_tokens,
+                            reasoning_effort=self.reasoning_effort,
+                        )
+                        break
+                    except Exception as e:
+                        if attempt < 2:
+                            logger.warning("Subagent provider chat failed (attempt {}/3): {}, retrying...", attempt + 1, str(e)[:200])
+                            await asyncio.sleep(1)
+                        else:
+                            logger.error("Subagent provider chat failed after 3 attempts.")
+                            raise e
 
                 if response.has_tool_calls:
                     # Add assistant message with tool calls
