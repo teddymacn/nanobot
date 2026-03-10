@@ -4,12 +4,11 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot/config.json:/root/.nanobot/config.json:ro
-    - ./roles/coder:/root/.nanobot/workspace
+    - ~/git/teddy_ma_bot:/root/.nanobot/workspace
     - ./skills:/root/.nanobot/workspace/skills
-    - /root/.nanobot/workspace/memory # anonymous volume for fresh memory each time
-    - ./roles/coder/memory/HISTORY.md:/root/.nanobot/workspace/memory/HISTORY.md # expose history
-    - ./roles/beads-template/HEARTBEAT.md:/root/.nanobot/workspace/HEARTBEAT.md
-    - .:/root/.nanobot/workspace/project
+    - ~/.gitconfig:/root/.gitconfig
+    - ~/.ssh:/root/.ssh
+    - /var/run/docker.sock:/var/run/docker.sock
   env_file:
     - .env
 
@@ -18,17 +17,9 @@ services:
     container_name: nanobot-gateway
     <<: *common-config
     command: ["gateway"]
-    restart: unless-stopped
+    restart: always
     ports:
       - 18790:18790
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 1G
-        reservations:
-          cpus: "0.25"
-          memory: 256M
 
   nanobot-cli:
     <<: *common-config
