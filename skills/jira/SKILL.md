@@ -152,7 +152,7 @@ Get full details of an issue (formatted as Markdown):
 ```bash
 ISSUE_KEY="PROJ-123"
 
-bash -c 'curl -s "https://${JIRA_DOMAIN%.atlassian.net}.atlassian.net/rest/api/3/issue/${ISSUE_KEY}" -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" --header "Accept: application/json" | python3 /root/.nanobot/workspace/skills/jira/jira_formatter.py'
+bash -c 'curl -s "https://${JIRA_DOMAIN%.atlassian.net}.atlassian.net/rest/api/3/issue/${ISSUE_KEY}" -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" --header "Accept: application/json" | python3 skills/jira/jira_formatter.py'
 ```
 
 > **Note:** The `jira_formatter.py` script automatically formats the JSON response into readable Markdown with all custom fields.
