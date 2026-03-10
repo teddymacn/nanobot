@@ -9,12 +9,14 @@ Usage:
     python claude_auto.py "your task description" [--model MODEL] [--working-dir PATH]
     python claude_auto.py --models
     python claude_auto.py --validate-model MODEL
+    python claude_auto.py --logs JOB_ID [--checkpoint OFFSET] [--max-bytes N] [--json]
 
 Examples:
     python claude_auto.py "Create a Python Flask app"
     python claude_auto.py "Refactor this code" --model claude-sonnet-4-6
     python claude_auto.py --models
     python claude_auto.py --validate-model claude-opus-4-6
+    python claude_auto.py --logs claude_20260304_120000_123 --checkpoint 0 --json
 """
 
 import argparse
@@ -320,6 +322,17 @@ def get_job_dir():
     return Path.home() / ".claude-jobs"
 
 
+def get_job_paths(job_id):
+    """Get the standard file paths for a job."""
+    job_dir = get_job_dir()
+    return {
+        "job_dir": job_dir,
+        "meta_file": job_dir / f"{job_id}.meta.json",
+        "pid_file": job_dir / f"{job_id}.pid",
+        "log_file": job_dir / f"{job_id}.log",
+    }
+
+
 def is_process_running(pid: int) -> bool:
     """
     Check if a process is actually running (not a zombie).
@@ -429,21 +442,18 @@ def start_claude_task(task, model, working_dir):
     return job_id, process.pid
 
 
-def check_job_status(job_id):
-    """Check the status of a job."""
-    job_dir = get_job_dir()
-    meta_file = job_dir / f"{job_id}.meta.json"
-    pid_file = job_dir / f"{job_id}.pid"
-    log_file = job_dir / f"{job_id}.log"
-    
+def resolve_job_state(job_id):
+    """Resolve persisted metadata and current process state for a job."""
+    paths = get_job_paths(job_id)
+    meta_file = paths["meta_file"]
+    pid_file = paths["pid_file"]
+
     if not meta_file.exists():
-        print(f"❌ Job not found: {job_id}")
-        return None
-    
+        return None, paths, False
+
     with open(meta_file, "r") as f:
         meta = json.load(f)
-    
-    # Check if process is still running
+
     is_running = False
     if pid_file.exists():
         with open(pid_file, "r") as f:
@@ -451,9 +461,24 @@ def check_job_status(job_id):
         if is_process_running(pid):
             is_running = True
         else:
-            update_job_status(job_id, "completed")
-    
+            if meta.get("status") != "completed":
+                update_job_status(job_id, "completed")
+                meta["status"] = "completed"
+
     meta["is_running"] = is_running
+    meta["status"] = "running" if is_running else meta.get("status", "completed")
+    return meta, paths, is_running
+
+
+def check_job_status(job_id):
+    """Check the status of a job."""
+    meta, paths, is_running = resolve_job_state(job_id)
+
+    if meta is None:
+        print(f"❌ Job not found: {job_id}")
+        return None
+
+    log_file = paths["log_file"]
     
     print(f"Job ID: {job_id}")
     print(f"Task: {meta.get('task', 'N/A')}")
@@ -470,6 +495,70 @@ def check_job_status(job_id):
                 print(line.rstrip())
     
     return meta
+
+
+def get_incremental_logs(job_id, checkpoint=0, max_bytes=4000):
+    """Return log output added since the provided checkpoint."""
+    if checkpoint < 0:
+        raise ValueError("checkpoint must be >= 0")
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be > 0")
+
+    meta, paths, is_running = resolve_job_state(job_id)
+    if meta is None:
+        raise FileNotFoundError(f"Job not found: {job_id}")
+
+    log_file = paths["log_file"]
+    if not log_file.exists():
+        raise FileNotFoundError(f"Log file not found for job: {job_id}")
+
+    log_size = log_file.stat().st_size
+    checkpoint_reset = checkpoint > log_size
+    start_offset = 0 if checkpoint_reset else checkpoint
+
+    with open(log_file, "rb") as f:
+        f.seek(start_offset)
+        content_bytes = f.read(max_bytes)
+        next_checkpoint = f.tell()
+
+    return {
+        "job_id": job_id,
+        "status": meta.get("status", "running" if is_running else "completed"),
+        "is_running": is_running,
+        "checkpoint": checkpoint,
+        "checkpoint_reset": checkpoint_reset,
+        "start_offset": start_offset,
+        "next_checkpoint": next_checkpoint,
+        "max_bytes": max_bytes,
+        "log_size": log_size,
+        "has_new_content": bool(content_bytes),
+        "truncated": next_checkpoint < log_size,
+        "content": content_bytes.decode("utf-8", errors="replace"),
+    }
+
+
+def print_incremental_logs(result, as_json=False):
+    """Print incremental log output in human or machine readable form."""
+    if as_json:
+        print(json.dumps(result, indent=2))
+        return
+
+    print(f"Job ID: {result['job_id']}")
+    print(f"Status: {result['status']}")
+    print(f"Running: {result['is_running']}")
+    print(f"Requested checkpoint: {result['checkpoint']}")
+    print(f"Start offset: {result['start_offset']}")
+    print(f"Next checkpoint: {result['next_checkpoint']}")
+    print(f"Log size: {result['log_size']}")
+    print(f"Truncated: {result['truncated']}")
+    if result["checkpoint_reset"]:
+        print("Note: checkpoint exceeded current log size; reading restarted from the beginning.")
+
+    print("\n--- Incremental log output ---")
+    if result["content"]:
+        print(result["content"], end="" if result["content"].endswith("\n") else "\n")
+    else:
+        print("(no new log output)")
 
 
 def get_job_results(job_id):
@@ -593,6 +682,7 @@ Examples:
     python claude_auto.py --models
     python claude_auto.py --validate-model claude-opus-4-6
     python claude_auto.py --status claude_20260304_120000_123
+    python claude_auto.py --logs claude_20260304_120000_123 --checkpoint 0 --json
     python claude_auto.py --results claude_20260304_120000_123
     python claude_auto.py --list
     python claude_auto.py --cleanup --days 7
@@ -605,10 +695,14 @@ Examples:
     parser.add_argument("--models", action="store_true", help="List available models")
     parser.add_argument("--validate-model", metavar="MODEL", help="Validate if a model is available")
     parser.add_argument("--status", metavar="JOB_ID", help="Check status of a job")
+    parser.add_argument("--logs", metavar="JOB_ID", help="Get incremental logs for a job")
     parser.add_argument("--results", metavar="JOB_ID", help="Get results of a job")
     parser.add_argument("--list", action="store_true", help="List all jobs")
     parser.add_argument("--cleanup", action="store_true", help="Clean up old jobs")
     parser.add_argument("--days", type=int, default=7, help="Days to keep jobs (for cleanup)")
+    parser.add_argument("--checkpoint", type=int, default=0, help="Byte offset checkpoint for --logs")
+    parser.add_argument("--max-bytes", type=int, default=4000, help="Max log bytes to return for --logs")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output")
     
     args = parser.parse_args()
     
@@ -662,6 +756,18 @@ Examples:
         
     elif args.status:
         check_job_status(args.status)
+    elif args.logs:
+        try:
+            result = get_incremental_logs(
+                args.logs,
+                checkpoint=args.checkpoint,
+                max_bytes=args.max_bytes,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ {e}")
+            sys.exit(1)
+
+        print_incremental_logs(result, as_json=args.json)
     elif args.results:
         get_job_results(args.results)
     elif args.list:

@@ -46,6 +46,9 @@ python scripts/copilot_auto.py --validate-model claude-sonnet-4.6
 # Check status
 python scripts/copilot_auto.py --status <job_id>
 
+# Get incremental logs
+python scripts/copilot_auto.py --logs <job_id> --checkpoint 0 --json
+
 # Get results (when completed)
 python scripts/copilot_auto.py --results <job_id>
 

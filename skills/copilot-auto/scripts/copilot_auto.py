@@ -10,6 +10,7 @@ Usage:
     python copilot_auto.py --models
     python copilot_auto.py --validate-model MODEL
     python copilot_auto.py --status <job_id>
+    python copilot_auto.py --logs JOB_ID [--checkpoint OFFSET] [--max-bytes N] [--json]
     python copilot_auto.py --results <job_id>
     python copilot_auto.py --list
     python copilot_auto.py --cleanup --days 7
@@ -20,6 +21,7 @@ Examples:
     python copilot_auto.py "Add tests" --working-dir /path/to/project
     python copilot_auto.py --models
     python copilot_auto.py --validate-model claude-sonnet-4.6
+    python copilot_auto.py --logs copilot_20260308_120000_123 --checkpoint 0 --json
 """
 
 import argparse
@@ -449,40 +451,63 @@ def start_background_task(task: str, model: str = None, working_dir: str = None)
     return job_id, process.pid
 
 
+def get_job_paths(job_id: str) -> dict:
+    """Get the standard file paths for a job."""
+    return {
+        "job_dir": JOBS_DIR,
+        "meta_file": JOBS_DIR / f"{job_id}.json",
+        "pid_file": JOBS_DIR / f"{job_id}.pid",
+        "log_file": JOBS_DIR / f"{job_id}.log",
+    }
+
+
+def resolve_job_state(job_id: str) -> Tuple[dict | None, dict, bool]:
+    """Resolve persisted metadata and current process state for a job."""
+    paths = get_job_paths(job_id)
+    meta_file = paths["meta_file"]
+
+    if not meta_file.exists():
+        return None, paths, False
+
+    with open(meta_file, "r") as f:
+        meta = json.load(f)
+
+    is_running = False
+    pid = meta.get("pid")
+    if pid:
+        if is_process_running(pid):
+            is_running = True
+        else:
+            if meta.get("status") != "completed":
+                meta["status"] = "completed"
+                meta["end_time"] = datetime.now().isoformat()
+                with open(meta_file, "w") as f:
+                    json.dump(meta, f, indent=2)
+
+    meta["is_running"] = is_running
+    meta["status"] = "running" if is_running else meta.get("status", "completed")
+    return meta, paths, is_running
+
+
 def check_job_status(job_id: str) -> dict | None:
     """Check the status of a background job."""
     ensure_jobs_dir()
+    meta, paths, is_running = resolve_job_state(job_id)
 
-    job_file = JOBS_DIR / f"{job_id}.json"
-    pid_file = JOBS_DIR / f"{job_id}.pid"
-    output_file = JOBS_DIR / f"{job_id}.log"
-
-    if not job_file.exists():
+    if meta is None:
         print(f"Job not found: {job_id}")
         return None
 
-    with open(job_file, 'r') as f:
-        job_info = json.load(f)
+    output_file = paths["log_file"]
 
-    # Check if process is still running (not zombie)
-    pid = job_info.get("pid")
-    if pid:
-        if is_process_running(pid):
-            job_info["status"] = "running"
-        else:
-            job_info["status"] = "completed"
-            job_info["end_time"] = datetime.now().isoformat()
-            with open(job_file, 'w') as f:
-                json.dump(job_info, f, indent=2)
-
-    print(f"Job ID: {job_info['job_id']}")
-    print(f"Task: {job_info['task']}")
-    print(f"Model: {job_info['model']}")
-    print(f"Status: {job_info['status']}")
-    print(f"Start time: {job_info['start_time']}")
-    if "end_time" in job_info:
-        print(f"End time: {job_info['end_time']}")
-    print(f"Output log: {job_info['output_file']}")
+    print(f"Job ID: {meta['job_id']}")
+    print(f"Task: {meta.get('task', 'N/A')}")
+    print(f"Model: {meta.get('model', 'default')}")
+    print(f"Status: {meta['status']}")
+    print(f"Start time: {meta.get('start_time', 'N/A')}")
+    if "end_time" in meta:
+        print(f"End time: {meta['end_time']}")
+    print(f"Output log: {meta.get('output_file', output_file)}")
 
     # Show last few lines of output
     if output_file.exists():
@@ -495,7 +520,72 @@ def check_job_status(job_id: str) -> dict | None:
         except Exception as e:
             print(f"Could not read output: {e}")
 
-    return job_info
+    return meta
+
+
+def get_incremental_logs(job_id: str, checkpoint: int = 0, max_bytes: int = 4000) -> dict:
+    """Return log output added since the provided checkpoint."""
+    if checkpoint < 0:
+        raise ValueError("checkpoint must be >= 0")
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be > 0")
+
+    ensure_jobs_dir()
+    meta, paths, is_running = resolve_job_state(job_id)
+    if meta is None:
+        raise FileNotFoundError(f"Job not found: {job_id}")
+
+    log_file = paths["log_file"]
+    if not log_file.exists():
+        raise FileNotFoundError(f"Log file not found for job: {job_id}")
+
+    log_size = log_file.stat().st_size
+    checkpoint_reset = checkpoint > log_size
+    start_offset = 0 if checkpoint_reset else checkpoint
+
+    with open(log_file, "rb") as f:
+        f.seek(start_offset)
+        content_bytes = f.read(max_bytes)
+        next_checkpoint = f.tell()
+
+    return {
+        "job_id": job_id,
+        "status": meta.get("status", "running" if is_running else "completed"),
+        "is_running": is_running,
+        "checkpoint": checkpoint,
+        "checkpoint_reset": checkpoint_reset,
+        "start_offset": start_offset,
+        "next_checkpoint": next_checkpoint,
+        "max_bytes": max_bytes,
+        "log_size": log_size,
+        "has_new_content": bool(content_bytes),
+        "truncated": next_checkpoint < log_size,
+        "content": content_bytes.decode("utf-8", errors="replace"),
+    }
+
+
+def print_incremental_logs(result: dict, as_json: bool = False):
+    """Print incremental log output in human or machine readable form."""
+    if as_json:
+        print(json.dumps(result, indent=2))
+        return
+
+    print(f"Job ID: {result['job_id']}")
+    print(f"Status: {result['status']}")
+    print(f"Running: {result['is_running']}")
+    print(f"Requested checkpoint: {result['checkpoint']}")
+    print(f"Start offset: {result['start_offset']}")
+    print(f"Next checkpoint: {result['next_checkpoint']}")
+    print(f"Log size: {result['log_size']}")
+    print(f"Truncated: {result['truncated']}")
+    if result["checkpoint_reset"]:
+        print("Note: checkpoint exceeded current log size; reading restarted from the beginning.")
+
+    print("\n--- Incremental log output ---")
+    if result["content"]:
+        print(result["content"], end="" if result["content"].endswith("\n") else "\n")
+    else:
+        print("(no new log output)")
 
 
 def get_job_results(job_id: str) -> dict | None:
@@ -601,6 +691,7 @@ Examples:
     python copilot_auto.py --models
     python copilot_auto.py --validate-model claude-sonnet-4.6
     python copilot_auto.py --status copilot_20260308_120000_123
+    python copilot_auto.py --logs copilot_20260308_120000_123 --checkpoint 0 --json
     python copilot_auto.py --results copilot_20260308_120000_123
     python copilot_auto.py --list
     python copilot_auto.py --cleanup --days 7
@@ -614,10 +705,14 @@ Examples:
     parser.add_argument("--models", action="store_true", help="List available models")
     parser.add_argument("--validate-model", metavar="MODEL", help="Validate if a model is available")
     parser.add_argument("--status", "-s", metavar="JOB_ID", help="Check status of a job")
+    parser.add_argument("--logs", metavar="JOB_ID", help="Get incremental logs for a job")
     parser.add_argument("--results", "-r", metavar="JOB_ID", help="Get results of a job")
     parser.add_argument("--list", "-l", action="store_true", help="List all jobs")
     parser.add_argument("--cleanup", "-c", action="store_true", help="Cleanup old jobs")
     parser.add_argument("--days", "-d", type=int, default=7, help="Days to keep jobs")
+    parser.add_argument("--checkpoint", type=int, default=0, help="Byte offset checkpoint for --logs")
+    parser.add_argument("--max-bytes", type=int, default=4000, help="Max log bytes to return for --logs")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output")
     parser.add_argument("--wait", action="store_true", help="Wait for task completion")
     parser.add_argument("--validate-token", "-v", action="store_true", help="Validate token and CLI")
     parser.add_argument("--skip-validation", action="store_true", help="Skip token validation")
@@ -703,6 +798,21 @@ Examples:
         check_job_status(args.status)
         return
 
+    # Handle logs mode
+    if args.logs:
+        try:
+            result = get_incremental_logs(
+                args.logs,
+                checkpoint=args.checkpoint,
+                max_bytes=args.max_bytes,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ {e}")
+            sys.exit(1)
+
+        print_incremental_logs(result, as_json=args.json)
+        return
+
     # Handle results mode
     if args.results:
         get_job_results(args.results)
@@ -716,7 +826,7 @@ Examples:
     # Require task for execution
     if not args.task:
         parser.print_help()
-        print("\nError: Please provide a task or use --status, --results, --list, --cleanup, --validate-token, or --models")
+        print("\nError: Please provide a task or use --status, --logs, --results, --list, --cleanup, --validate-token, or --models")
         sys.exit(1)
 
     # Validate model if specified

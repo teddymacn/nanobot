@@ -21,6 +21,7 @@ python scripts/copilot_auto.py "Create a Flask app" --wait
 | `python scripts/copilot_auto.py "task" --model MODEL` | Run with specific model |
 | `python scripts/copilot_auto.py "task" --wait` | Wait for completion |
 | `python scripts/copilot_auto.py --status JOB_ID` | Check job status |
+| `python scripts/copilot_auto.py --logs JOB_ID` | Get incremental job logs |
 | `python scripts/copilot_auto.py --results JOB_ID` | Get job results |
 | `python scripts/copilot_auto.py --list` | List all jobs |
 | `python scripts/copilot_auto.py --cleanup --days 7` | Cleanup old jobs |

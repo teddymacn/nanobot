@@ -41,6 +41,9 @@ python scripts/claude_auto.py --validate-model <model-name>
 # Check status
 python scripts/claude_auto.py --status <job_id>
 
+# Get incremental logs since a checkpoint
+python scripts/claude_auto.py --logs <job_id> --checkpoint <offset> --json
+
 # Get results
 python scripts/claude_auto.py --results <job_id>
 
@@ -99,6 +102,37 @@ Jobs are stored in `~/.claude-jobs/` with:
 - `<job_id>.log` - Output log
 - `<job_id>.pid` - Process ID
 - `<job_id>.meta.json` - Metadata (task, model, start time, etc.)
+
+## Incremental Log Polling
+
+When a background job is still running and you need more detail than `--status` provides, use incremental log polling:
+
+```bash
+python scripts/claude_auto.py --logs <job_id> --checkpoint <offset> --json
+```
+
+Recommended polling flow:
+
+1. Start with checkpoint `0`
+2. Save the returned `next_checkpoint`
+3. On the next poll, pass that value back to `--checkpoint`
+4. Repeat until `status` is `completed`
+
+Example JSON fields returned by `--logs --json`:
+
+- `content` - New log content since the last checkpoint
+- `next_checkpoint` - Offset to use on the next poll
+- `has_new_content` - Whether anything new was written
+- `truncated` - Whether output was capped by `--max-bytes`
+- `status` / `is_running` - Current job state
+
+You can also control response size with:
+
+```bash
+python scripts/claude_auto.py --logs <job_id> --checkpoint <offset> --max-bytes 8000 --json
+```
+
+Use this when the agent needs to understand what the running background job is doing without re-reading the entire log file every time.
 
 ## Requirements
 

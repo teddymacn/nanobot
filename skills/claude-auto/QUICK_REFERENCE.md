@@ -29,6 +29,9 @@ python scripts/claude_auto.py --validate-model <model-name>
 # Check status
 python scripts/claude_auto.py --status <job_id>
 
+# Get incremental logs since last checkpoint
+python scripts/claude_auto.py --logs <job_id> --checkpoint <offset> --json
+
 # Get results (waits for completion)
 python scripts/claude_auto.py --results <job_id>
 
@@ -68,6 +71,13 @@ Jobs are stored in `~/.claude-jobs/`:
 - `<job_id>.log` - Output log
 - `<job_id>.pid` - Process ID
 - `<job_id>.meta.json` - Metadata
+
+## Incremental Log Polling
+
+- First poll: use `--checkpoint 0`
+- Next polls: reuse the returned `next_checkpoint`
+- Add `--max-bytes <n>` if you want a larger chunk
+- Prefer `--json` so the caller can parse `content`, `next_checkpoint`, `status`, and `truncated`
 
 ## Model Listing Fallback
 
