@@ -204,6 +204,13 @@ class AgentLoop:
                         max_tokens=self.max_tokens,
                         reasoning_effort=self.reasoning_effort,
                     )
+                    if response.finish_reason == "error":
+                        if attempt < 2:
+                            logger.warning("Provider chat returned error (attempt {}/3): {}, retrying...", attempt + 1, response.content[:200])
+                            await asyncio.sleep(1)
+                            continue
+                        else:
+                            logger.error("Provider chat returned error after 3 attempts.")
                     break
                 except Exception as e:
                     if attempt < 2:
@@ -535,6 +542,13 @@ class AgentLoop:
                     max_tokens=512,
                     reasoning_effort=self.reasoning_effort,
                 )
+                if response.finish_reason == "error":
+                    if attempt < 2:
+                        logger.warning("Fast respond chat returned error (attempt {}/3): {}, retrying...", attempt + 1, response.content[:200])
+                        await asyncio.sleep(1)
+                        continue
+                    else:
+                        logger.error("Fast respond chat returned error after 3 attempts.")
                 break
             except Exception as e:
                 if attempt < 2:
