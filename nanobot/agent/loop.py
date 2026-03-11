@@ -109,7 +109,10 @@ class AgentLoop:
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
-        self._processing_lock = asyncio.Lock()
+        # Per-session processing locks: serializes messages within the same session while
+        # allowing tasks from different sessions (e.g. different Telegram groups) to run
+        # concurrently.  WeakValueDictionary lets idle entries be GC'd automatically.
+        self._processing_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -314,8 +317,14 @@ class AgentLoop:
         ))
 
     async def _dispatch(self, msg: InboundMessage) -> None:
-        """Process a message under the global lock."""
-        async with self._processing_lock:
+        """Process a message under a per-session lock.
+
+        Messages for the same session are serialized (preserving in-order
+        processing and safe session-state mutation), while messages from
+        different sessions can run concurrently.
+        """
+        lock = self._processing_locks.setdefault(msg.session_key, asyncio.Lock())
+        async with lock:
             try:
                 response = await self._process_message(msg)
                 if response is not None:

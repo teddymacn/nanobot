@@ -104,7 +104,8 @@ class TestDispatch:
         assert out.content == "hi"
 
     @pytest.mark.asyncio
-    async def test_processing_lock_serializes(self):
+    async def test_processing_lock_serializes_same_session(self):
+        """Messages for the same session are still processed in order."""
         from nanobot.bus.events import InboundMessage, OutboundMessage
 
         loop, bus = _make_loop()
@@ -124,6 +125,37 @@ class TestDispatch:
         t2 = asyncio.create_task(loop._dispatch(msg2))
         await asyncio.gather(t1, t2)
         assert order == ["start-a", "end-a", "start-b", "end-b"]
+
+    @pytest.mark.asyncio
+    async def test_different_sessions_run_in_parallel(self):
+        """Messages from different sessions (e.g. different Telegram groups) are not blocked by each other."""
+        from nanobot.bus.events import InboundMessage, OutboundMessage
+
+        loop, bus = _make_loop()
+        started: list[str] = []
+        finished: list[str] = []
+        both_started = asyncio.Event()
+
+        async def mock_process(m, **kwargs):
+            started.append(m.content)
+            if len(started) == 2:
+                both_started.set()
+            await both_started.wait()  # only returns when both tasks are running at once
+            finished.append(m.content)
+            return OutboundMessage(channel="test", chat_id=m.chat_id, content=m.content)
+
+        loop._process_message = mock_process
+        # Two messages for two different groups (different chat_id → different session_key)
+        msg1 = InboundMessage(channel="test", sender_id="u1", chat_id="group1", content="g1")
+        msg2 = InboundMessage(channel="test", sender_id="u2", chat_id="group2", content="g2")
+
+        t1 = asyncio.create_task(loop._dispatch(msg1))
+        t2 = asyncio.create_task(loop._dispatch(msg2))
+        # If the tasks were serialized, both_started would never be set by both
+        # coroutines before either of them awaits it — the test would deadlock.
+        await asyncio.wait_for(asyncio.gather(t1, t2), timeout=2.0)
+        assert set(started) == {"g1", "g2"}
+        assert set(finished) == {"g1", "g2"}
 
 
 class TestSubagentCancellation:
