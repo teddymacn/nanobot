@@ -3,6 +3,7 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
+    - ./nanobot/skills:/root/.claude/skills
     - ~/.nanobot/config.json:/root/.nanobot/config.json:ro
     - ~/git/teddy_ma_bot:/root/.nanobot/workspace
     - ./skills:/root/.nanobot/workspace/skills
