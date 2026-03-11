@@ -187,8 +187,8 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
-        """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
+    ) -> tuple[str | None, list[str], list[dict], bool]:
+        """Run the agent iteration loop. Returns (final_content, tools_used, messages, success)."""
         messages = initial_messages
         iteration = 0
         final_content = None
@@ -264,7 +264,7 @@ class AgentLoop:
                 if response.finish_reason == "error":
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
-                    break
+                    return final_content, tools_used, messages, False
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
@@ -279,7 +279,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        return final_content, tools_used, messages
+        return final_content, tools_used, messages, True
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -378,9 +378,10 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
-            self._save_turn(session, all_msgs, 1 + len(history))
-            self.sessions.save(session)
+            final_content, _, all_msgs, success = await self._run_agent_loop(messages)
+            if success:
+                self._save_turn(session, all_msgs, 1 + len(history))
+                self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -446,15 +447,15 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, success = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
-
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
+        if success:
+            if final_content is None:
+                final_content = "I've completed processing but have no response to give."
+            self._save_turn(session, all_msgs, 1 + len(history))
+            self.sessions.save(session)
 
         # Check consolidation AFTER saving the turn so the new messages are
         # counted. This ensures even a brand-new session (e.g. first heartbeat

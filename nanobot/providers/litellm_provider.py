@@ -169,11 +169,14 @@ class LiteLLMProvider(LLMProvider):
 
     @staticmethod
     def _normalize_tool_call_id(tool_call_id: Any) -> Any:
-        """Normalize tool_call_id to a provider-safe 9-char alphanumeric form."""
+        """Normalize tool_call_id to a provider-safe alphanumeric form."""
         if not isinstance(tool_call_id, str):
             return tool_call_id
-        if len(tool_call_id) == 9 and tool_call_id.isalnum():
+        # If it's already a reasonable length and alphanumeric (plus safe chars), keep it.
+        # Many providers (OpenAI, DashScope, Gemini) require or prefer their own original IDs.
+        if 1 <= len(tool_call_id) <= 64 and all(c.isalnum() or c in '-_.' for c in tool_call_id):
             return tool_call_id
+        # Otherwise, hash it to a safe 9-char alphanumeric form for picky providers (e.g. old Mistral).
         return hashlib.sha1(tool_call_id.encode()).hexdigest()[:9]
 
     @staticmethod
@@ -304,14 +307,31 @@ class LiteLLMProvider(LLMProvider):
 
         tool_calls = []
         for tc in raw_tool_calls:
-            # Parse arguments from JSON string if needed
-            args = tc.function.arguments
+            # Extract function object robustly
+            func = getattr(tc, "function", None)
+            if not func and isinstance(tc, dict):
+                func = tc.get("function")
+            if not func:
+                continue
+
+            # Extract name and arguments
+            name = getattr(func, "name", None) or (func.get("name") if isinstance(func, dict) else None)
+            args = getattr(func, "arguments", None) or (func.get("arguments") if isinstance(func, dict) else "{}")
+            if not name:
+                continue
+
+            # Parse arguments if string
             if isinstance(args, str):
                 args = json_repair.loads(args)
 
+            # Extract tool call ID robustly
+            tc_id = getattr(tc, "id", None)
+            if not tc_id and isinstance(tc, dict):
+                tc_id = tc.get("id")
+
             tool_calls.append(ToolCallRequest(
-                id=_short_tool_id(),
-                name=tc.function.name,
+                id=tc_id or _short_tool_id(),
+                name=name,
                 arguments=args,
             ))
 
