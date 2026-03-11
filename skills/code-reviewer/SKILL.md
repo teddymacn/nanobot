@@ -16,7 +16,7 @@ description: >
 
 1. **JIRA TICKETS (Step 2):** If the PR title/body contains a Jira ticket ID (e.g., `EFEKTA-12345`, `ABC-999`), you MUST fetch the ticket details using the `jira` skill BEFORE analyzing code. Use this context to evaluate if changes meet requirements.
 
-2. **INLINE COMMENTS FIRST (Step 5):** You MUST post ALL inline comments on specific lines FIRST using `gh pr comment --commit <sha> --body "<comment>"`. ONLY after all inline comments are posted, submit the final review with `gh pr review`. Summary-only reviews without inline comments are INVALID.
+2. **INLINE COMMENTS FIRST (Step 5):** You MUST post ALL inline comments on specific lines FIRST using appropriate `gh` CLI commands (e.g., `gh api`). ONLY after all inline comments are posted, submit the final review with `gh pr review`. Summary-only reviews without inline comments are INVALID.
 
 3. **WORKFLOW ORDER:** Steps must be completed in exact order: (1) PR metadata → (2) Jira context → (3) Code diffs → (4) Decision matrix → (5) Inline comments + review submission → (6) Cleanup.
 
@@ -53,6 +53,12 @@ This skill guides the agent in conducting professional code reviews with a focus
 Use the `gh` cli to fetch the PR metadata, including the title, body, author, branch names, and commits.
 *(Hint: Use the knowledge from the `github` skill to perform this action).*
 
+#### Example:
+```bash
+# Fetch core metadata and commits to identify the head SHA
+gh pr view 123 --json title,body,author,headRefName,commits
+```
+
 ### 2. Scan and Fetch Jira Context
 
 **Step 2a: Extract JIRA Ticket IDs from PR Metadata**
@@ -66,12 +72,26 @@ If any ticket IDs are found:
 - Check if the `jira` skill exists in the workspace (`skills/jira/SKILL.md`) and if its required ENV VARs are set.
 - If it exists and the ENV VARs are set, use the `jira` skill to fetch all ticket details BEFORE fetching or analyzing code diffs. Use this context to evaluate if the changes meet the original requirements.
 
+#### Example:
+```bash
+# 1. PR Title: "[PROJ-1234] Implement user login"
+# 2. Ticket ID: PROJ-1234
+# 3. Fetch details via Jira skill
+ISSUE_KEY="PROJ-1234"
+bash -c 'curl -s "https://${JIRA_DOMAIN%.atlassian.net}.atlassian.net/rest/api/3/issue/${ISSUE_KEY}" -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" --header "Accept: application/json" | python3 skills/jira/jira_formatter.py'
+```
+
 **Step 2c: Log and Communicate the Jira Decision (MANDATORY)**
 
 Before proceeding to Step 3, you MUST explicitly log your decision regarding the Jira context using an `echo` command so it shows up in the user's run logs.
 
 - If Jira tickets were fetched, log: `echo "Successfully fetched details for <TICKET_IDs>"` and tell the user in the session what tickets were found.
 - If no Jira tickets were found, or the `jira` skill/ENV VARs are unavailable, log: `echo "Proceeding to code diffs."`.
+
+#### Example Log:
+```bash
+echo "Successfully fetched details for PROJ-1234"
+```
 
 ### 3. Fetch Code Diffs and Analyze Changes
 
@@ -107,6 +127,16 @@ Now that you have the Jira context (if any), fetch the code diffs and files to a
 - [ ] Weak cryptography (MD5, SHA1, DES)
 - [ ] Hardcoded secrets
 
+#### Example:
+```bash
+# Fetch the diff to a temporary file for analysis
+gh pr diff 123 > /tmp/pr_123.diff
+
+# Analyze the diff for language-specific issues
+# If SQL injection is found in src/db.py on line 42:
+echo "Identified Critical Severity issue: SQL injection in src/db.py:42"
+```
+
 ### 4. Decision Matrix
 
 Based on issues found:
@@ -118,6 +148,10 @@ Based on issues found:
 | Multiple moderate issues | `REQUEST_CHANGES` |
 | Minor issues only (style, naming, small improvements) | `COMMENT` |
 | No issues found | `APPROVE` (check Approval Policy below) |
+
+#### Example Logic:
+- **Scenario:** Found 1 hardcoded API key (Critical) and 1 minor documentation typo (Minor).
+- **Action:** `REQUEST_CHANGES` because at least one issue is Critical/Major.
 
 **Approval Policy:**
 - **Single Reviewer (Only You):** If no issues are found, `APPROVE` by default.
@@ -155,6 +189,11 @@ Based on issues found:
 - List of issues found (with severity)
 - Recommendation (approve/changes needed)
 - Attribution
+
+#### Example Execution Flow:
+1. **Comment 1 (Inline):** `gh api repos/:owner/:repo/pulls/123/comments -f body="CRITICAL: Hardcoded secret.<br><small>(by code-reviewer)</small>" -f commit_id="abc1234" -f path="config.py" -f line=42 -f side="RIGHT"`
+2. **Comment 2 (Inline):** `gh api repos/:owner/:repo/pulls/123/comments -f body="Minor: Typo in comment.<br><small>(by code-reviewer)</small>" -f commit_id="abc1234" -f path="main.py" -f line=10 -f side="RIGHT"`
+3. **Submit Review (Final):** `gh pr review 123 --request-changes --body "Review complete. Found 1 critical security issue and 1 minor typo.<br><small>(by code-reviewer)</small>"`
 
 ### 6. Deliver Feedback
 
@@ -210,6 +249,11 @@ Format:
 **MANDATORY:** After completing the code review and posting all comments:
 - Delete any temporary files created during the process (e.g. diff files, downloaded patches, standalone scripts used for analysis).
 - Ensure the workspace is restored to a clean state.
+
+#### Example:
+```bash
+rm /tmp/pr_123.diff /tmp/analysis_results.txt
+```
 
 ## Examples
 
